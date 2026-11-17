@@ -296,6 +296,26 @@ class TestUtils(TestCase):
         self.assertEqual(datasheet_tops(torch.float32, device_name=device_name), 26.2)
         self.assertEqual(datasheet_dram_bw_gbs(device_name=device_name), 1638.4)
 
+    def test_h100_datasheet_values_are_dense(self):
+        # The H100 datasheet marks only the Tensor Core TF32/BF16/FP16/FP8/INT8 rows
+        # as "with sparsity"; FP32 and FP64 Tensor Core (67 TFLOPS) are already dense.
+        device_name = "NVIDIA H100"
+        expected = {
+            torch.float64: 67.0,
+            torch.float32: 67.0,
+            torch.bfloat16: 989.5,
+            torch.float16: 989.5,
+            torch.float8_e4m3fn: 1979.0,
+            torch.float8_e5m2: 1979.0,
+            torch.int8: 1979.0,
+        }
+        for dtype, tops in expected.items():
+            with self.subTest(dtype=dtype):
+                self.assertEqual(datasheet_tops(dtype, device_name=device_name), tops)
+        self.assertEqual(
+            datasheet_tops(torch.float32, is_tf32=True, device_name=device_name), 494.5
+        )
+
     def test_register_device_info_normalizes_name(self):
         info = DeviceInfo(tops={}, dram_bw_gbs=123.0, dram_gb=1.0)
         with patch.dict(_device_mapping):
