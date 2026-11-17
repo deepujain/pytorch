@@ -791,6 +791,23 @@ class TestDecomp(TestCase):
         self.assertEqual(shape, res[0].shape)
 
     @onlyCPU
+    def test_native_batch_norm_eval_save_stats_empty(self, device):
+        # https://github.com/pytorch/pytorch/issues/85960
+        # Eval mode returns empty save_mean and save_invstd on every device. The
+        # meta device stands in for CUDA, which used to return running_mean and
+        # the inverse std instead.
+        batch_norm = torch._decomp.decompositions.native_batch_norm
+        for dev in ("cpu", "meta"):
+            for dtype in (torch.float32, torch.float16):
+                x = torch.empty(4, 3, 5, device=dev, dtype=dtype)
+                stats = torch.empty(3, device=dev, dtype=dtype)
+                _, save_mean, save_invstd = batch_norm(
+                    x, None, None, stats, stats, False, 0.1, 1e-5
+                )
+                self.assertEqual(save_mean.shape, (0,))
+                self.assertEqual(save_invstd.shape, (0,))
+
+    @onlyCPU
     def test_log_sigmoid_forward_buffer_shape(self, device):
         # The buffer output of aten.log_sigmoid_forward is only consumed by the
         # CPU backward kernel (log_sigmoid_backward_cpu); the accelerator

@@ -11615,6 +11615,36 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_eval(2, device, dtype, torch.float)
                 self._test_batchnorm_eval(3, device, dtype, torch.float)
 
+    @dtypes(torch.float)
+    @dtypesIfCUDA(torch.float, torch.half, torch.bfloat16)
+    def test_native_batch_norm_eval_save_stats_empty(self, device, dtype):
+        # https://github.com/pytorch/pytorch/issues/85960
+        x = torch.randn(4, 3, 5, device=device, dtype=dtype, requires_grad=True)
+        weight = torch.randn(3, device=device, dtype=dtype, requires_grad=True)
+        bias = torch.randn(3, device=device, dtype=dtype, requires_grad=True)
+        # Strided running stats cover the non-contiguous path
+        running_mean = torch.randn(6, device=device, dtype=dtype)[::2]
+        running_var = torch.rand(6, device=device, dtype=dtype)[::2] + 0.5
+        eps = 1e-5
+
+        out, save_mean, save_invstd = torch.native_batch_norm(
+            x, weight, bias, running_mean, running_var, False, 0.1, eps
+        )
+        self.assertEqual(save_mean.shape, (0,))
+        self.assertEqual(save_invstd.shape, (0,))
+
+        mean = running_mean.float().view(1, 3, 1)
+        invstd = (running_var.float() + eps).rsqrt().view(1, 3, 1)
+        ref = (x.float() - mean) * invstd * weight.float().view(1, 3, 1)
+        ref = (ref + bias.float().view(1, 3, 1)).to(dtype)
+        atol, rtol = (1e-5, 1.3e-6) if dtype == torch.float else (5e-2, 5e-2)
+        self.assertEqual(out, ref, atol=atol, rtol=rtol)
+
+        grad = torch.randn_like(out)
+        grads = torch.autograd.grad(out, (x, weight, bias), grad)
+        ref_grads = torch.autograd.grad(ref, (x, weight, bias), grad)
+        self.assertEqual(grads, ref_grads, atol=atol, rtol=rtol)
+
     def _test_batchnorm_affine(self, ndim, device, dtype, module_dtype=None):
         # Compare affine against no-op weights and bias
         module_dtype = module_dtype or dtype
