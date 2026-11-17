@@ -2301,6 +2301,58 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(res3.requires_grad)
         res1.sum().backward()
 
+    def test_mark_non_differentiable_single_output(self):
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x * 2.0
+                ctx.mark_non_differentiable(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                return None
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return MyFunction.apply(x)
+
+        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        ref = MyFunction.apply(x)
+        res = fn(x)
+        self.assertEqual(ref, res)
+        self.assertFalse(ref.requires_grad)
+        self.assertFalse(res.requires_grad)
+
+    def test_mark_non_differentiable_single_output_in_backward(self):
+        from torch.autograd import Function
+
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2.0
+
+            @staticmethod
+            def backward(ctx, grad):
+                out = grad * 2.0
+                ctx.mark_non_differentiable(out)
+                return out
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return MyFunction.apply(x)
+
+        ref_x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        x = ref_x.detach().clone().requires_grad_(True)
+        MyFunction.apply(ref_x).sum().backward()
+        res = fn(x)
+        self.assertTrue(res.requires_grad)
+        res.sum().backward()
+        self.assertEqual(ref_x.grad, x.grad)
+
     def test_default_values(self):
         from torch.autograd import Function
 
