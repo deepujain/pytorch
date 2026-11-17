@@ -702,8 +702,11 @@ class SizeVarAllocator:
             return False
 
         def gcd_covers_denominator(gcd: sympy.Basic) -> bool:
+            # sympy returns the monic gcd, so it may be -denominator.
             return gcd != 1 and (
-                gcd == denominator or self.simplify(gcd - denominator) == 0
+                gcd == denominator
+                or self.simplify(gcd - denominator) == 0
+                or self.simplify(gcd + denominator) == 0
             )
 
         try:

@@ -1163,6 +1163,18 @@ class TestWideExpressionThresholds(InductorTestCase):
 
         self.assertTrue(sizevars.statically_known_multiple_of(numerator, denominator))
 
+    def test_statically_known_multiple_of_gcd_up_to_sign(self):
+        sizevars = SizeVarAllocator()
+        s77 = sympy.Symbol("s77", integer=True, positive=True)
+
+        # sympy returns the monic gcd s77 - 14, the negation of the denominator.
+        self.assertTrue(sizevars.statically_known_multiple_of(616 - 44 * s77, 14 - s77))
+        self.assertTrue(sizevars.statically_known_multiple_of(44 * s77 - 616, 14 - s77))
+        self.assertTrue(sizevars.statically_known_multiple_of(616 - 44 * s77, s77 - 14))
+        self.assertFalse(
+            sizevars.statically_known_multiple_of(616 - 44 * s77, 15 - s77)
+        )
+
     def test_wide_modular_indexing_not_decomposed(self):
         """ModularIndexing with a wide base should not enter the per-term
         simplification loop (its result would feed into sympy.expand which
