@@ -13007,6 +13007,69 @@ graph():
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
 
+    def test_non_strict_cond_branches_share_scope_root_walk(self):
+        from torch.fx.experimental import proxy_tensor
+
+        class M(torch.nn.Module):
+            def __init__(self, n):
+                super().__init__()
+                self.experts = torch.nn.ModuleList(
+                    torch.nn.Linear(4, 4) for _ in range(n)
+                )
+
+            def forward(self, x):
+                out = torch.zeros_like(x)
+                for e in self.experts:
+                    out = torch.cond(
+                        x.sum() > 0,
+                        lambda o, x, e=e: o + e(x),
+                        lambda o, x: o.clone(),
+                        (out, x),
+                    )
+                return out
+
+        def count_scope_root_walks(n):
+            mod = M(n)
+            walks = 0
+            in_init = False
+            orig_named_modules = torch.nn.Module.named_modules
+            orig_init = proxy_tensor._ModuleStackTracer.__init__
+
+            def counting_named_modules(self, *args, **kwargs):
+                nonlocal walks
+                walks += in_init and self is mod
+                return orig_named_modules(self, *args, **kwargs)
+
+            def counting_init(self, *args, **kwargs):
+                nonlocal in_init
+                in_init = True
+                try:
+                    orig_init(self, *args, **kwargs)
+                finally:
+                    in_init = False
+
+            with (
+                patch.object(torch.nn.Module, "named_modules", counting_named_modules),
+                patch.object(
+                    proxy_tensor._ModuleStackTracer, "__init__", counting_init
+                ),
+            ):
+                ep = export(mod, (torch.randn(2, 4),), strict=False)
+            return walks, ep
+
+        walks_few, _ = count_scope_root_walks(2)
+        walks_many, ep_many = count_scope_root_walks(6)
+        self.assertEqual(walks_few, walks_many)
+
+        cond_stacks = [
+            list(node.meta["nn_module_stack"].values())
+            for node in ep_many.graph.nodes
+            if node.target is torch.ops.higher_order.cond
+        ]
+        self.assertEqual(len(cond_stacks), 6)
+        for stack in cond_stacks:
+            self.assertEqual(stack, [("", f"{M.__module__}.{M.__qualname__}")])
+
     def test_unflatten_random_dag_5(self):
         # dag: {0: [1, 2, 3], 1: [2, 4], 2: [4], 3: [], 4: []}
 
